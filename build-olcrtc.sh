@@ -29,7 +29,7 @@ if [ ! -f AndroidLibXrayLite/go.mod ]; then
   git submodule update --init AndroidLibXrayLite
 fi
 
-# Regenerate go.work (not tracked — local-only workspace file).
+# Regenerate go.work (not tracked - local-only workspace file).
 # Combining both modules into one workspace is what lets gomobile bind
 # produce a single libgojni.so with both xray-core and olcRTC symbols.
 rm -f go.work go.work.sum
