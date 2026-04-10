@@ -125,22 +125,22 @@ object AppConfig {
 
     /** DNS server addresses. */
     const val DNS_PROXY = "1.1.1.1"
-    const val DNS_DIRECT = "223.5.5.5"
+    const val DNS_DIRECT = "77.88.8.8"
     const val DNS_VPN = "1.1.1.1"
 
     /** Address the olcRTC mapdns interceptor listens on inside the TUN.
      *  Looks like a normal public resolver to fingerprinting tools. */
     const val OLCRTC_FAKE_DNS = "1.1.1.1"
+    const val OLCRTC_GEOSITE_DAT = "olcrtc-geosite.dat"
+    const val OLCRTC_GEOSITE_TAG = "russia-inside"
+    const val OLCRTC_GEOSITE_URL = "https://github.com/itdoginfo/allow-domains/releases/latest/download/geosite.dat"
+    const val OLCRTC_UPSTREAM_PORT_OFFSET = 1000
     const val GEOSITE_PRIVATE = "geosite:private"
-    const val GEOSITE_CN = "geosite:cn"
     const val GEOIP_PRIVATE = "geoip:private"
-    const val GEOIP_CN = "geoip:cn"
 
     /** Geo data file names. */
     const val GEOSITE_DAT = "geosite.dat"
     const val GEOIP_DAT = "geoip.dat"
-    const val GEOIP_ONLY_CN_PRIVATE_DAT = "geoip-only-cn-private.dat"
-    const val GEOIP_ONLY_CN_PRIVATE_URL = "$GITHUB_RAW_URL/Loyalsoldier/geoip/release/$GEOIP_ONLY_CN_PRIVATE_DAT"
 
     /** Ports and addresses for various services. */
     const val PORT_LOCAL_DNS = "10853"
@@ -198,12 +198,9 @@ object AppConfig {
     const val HEVTUN_RW_TIMEOUT = "300,60"
 
     // Google API rule constants
-    const val GOOGLEAPIS_CN_DOMAIN = "domain:googleapis.cn"
     const val GOOGLEAPIS_COM_DOMAIN = "googleapis.com"
 
     // Android Private DNS constants
-    const val DNS_DNSPOD_DOMAIN = "dot.pub"
-    const val DNS_ALIDNS_DOMAIN = "dns.alidns.com"
     const val DNS_CLOUDFLARE_ONE_DOMAIN = "one.one.one.one"
     const val DNS_CLOUDFLARE_DNS_COM_DOMAIN = "dns.cloudflare.com"
     const val DNS_CLOUDFLARE_DNS_DOMAIN = "cloudflare-dns.com"
@@ -219,11 +216,9 @@ object AppConfig {
     const val REALITY = "reality"
     const val HEADER_TYPE_HTTP = "http"
 
-    val DNS_ALIDNS_ADDRESSES = arrayListOf("223.5.5.5", "223.6.6.6", "2400:3200::1", "2400:3200:baba::1")
     val DNS_CLOUDFLARE_ONE_ADDRESSES = arrayListOf("1.1.1.1", "1.0.0.1", "2606:4700:4700::1111", "2606:4700:4700::1001")
     val DNS_CLOUDFLARE_DNS_COM_ADDRESSES = arrayListOf("104.16.132.229", "104.16.133.229", "2606:4700::6810:84e5", "2606:4700::6810:85e5")
     val DNS_CLOUDFLARE_DNS_ADDRESSES = arrayListOf("104.16.248.249", "104.16.249.249", "2606:4700::6810:f8f9", "2606:4700::6810:f9f9")
-    val DNS_DNSPOD_ADDRESSES = arrayListOf("1.12.12.12", "120.53.53.53")
     val DNS_GOOGLE_ADDRESSES = arrayListOf("8.8.8.8", "8.8.4.4", "2001:4860:4860::8888", "2001:4860:4860::8844")
     val DNS_QUAD9_ADDRESSES = arrayListOf("9.9.9.9", "149.112.112.112", "2620:fe::fe", "2620:fe::9")
     val DNS_YANDEX_ADDRESSES = arrayListOf("77.88.8.8", "77.88.8.1", "2a02:6b8::feed:0ff", "2a02:6b8:0:1::feed:0ff")
@@ -274,8 +269,8 @@ object AppConfig {
     )
 
     val GEO_FILES_SOURCES = arrayListOf(
-        "Loyalsoldier/v2ray-rules-dat",
         "runetfreedom/russia-v2ray-rules-dat",
+        "Loyalsoldier/v2ray-rules-dat",
         "Chocolate4U/Iran-v2ray-rules"
     )
 

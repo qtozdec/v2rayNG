@@ -71,8 +71,6 @@ class TProxyService(
 
             val olcrtc = isOlcrtcSelected()
             if (olcrtc) {
-                // TProxyService runs before OlcrtcManager.start(); make sure the
-                // credentials exist so the yaml and olcRTC agree on them.
                 OlcrtcManager.ensureCredentials()
             }
             appendLine("socks5:")
@@ -80,6 +78,9 @@ class TProxyService(
             appendLine("  address: ${AppConfig.LOOPBACK}")
             appendLine("  udp: 'udp'")
             if (olcrtc && OlcrtcManager.socksUser.isNotEmpty()) {
+                // Same credentials gate the Xray SOCKS inbound — without this
+                // any device-local app could use 127.0.0.1:socksPort unauthenticated
+                // and leak the exit IP via the proxy.
                 appendLine("  username: '${OlcrtcManager.socksUser}'")
                 appendLine("  password: '${OlcrtcManager.socksPass}'")
             }

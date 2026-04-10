@@ -231,31 +231,51 @@ object V2RayServiceManager {
     }
 
     /**
-     * Starts the olcRTC transport (bypasses xray-core entirely).
-     * olcRTC provides its own SOCKS5 proxy via Telemost WebRTC tunneling.
+     * Starts olcRTC as an upstream SOCKS5 hop and Xray as the local router.
+     * This keeps Android TUN generic while domain split routing stays in Xray.
      */
     private fun startOlcrtcLoop(service: Service, config: ProfileItem): Boolean {
-        val socksPort = SettingsManager.getSocksPort()
+        val guid = MmkvManager.getSelectServer() ?: return false
+        val upstreamSocksPort = SettingsManager.getOlcrtcSocksPort()
         val protectSocket: ((Int) -> Boolean)? = serviceControl?.get()?.let { sc ->
             { fd: Int -> sc.vpnProtect(fd) }
         }
 
         try {
             NotificationManager.showNotification(currentConfig)
-            if (!OlcrtcManager.start(config, socksPort, protectSocket)) {
+            if (!OlcrtcManager.start(config, upstreamSocksPort, protectSocket)) {
                 Log.e(AppConfig.TAG, "StartCore-Manager: olcRTC failed to start")
+                MessageUtil.sendMsg2UI(service, AppConfig.MSG_STATE_START_FAILURE, "")
+                NotificationManager.cancelNotification()
+                return false
+            }
+
+            val result = V2rayConfigManager.getOlcrtcGatewayConfig(service, guid, upstreamSocksPort)
+            if (!result.status) {
+                Log.e(AppConfig.TAG, "StartCore-Manager: failed to get olcRTC gateway config")
+                OlcrtcManager.stop()
+                MessageUtil.sendMsg2UI(service, AppConfig.MSG_STATE_START_FAILURE, "")
+                NotificationManager.cancelNotification()
+                return false
+            }
+
+            coreController.startLoop(result.content, 0)
+            if (coreController.isRunning == false) {
+                Log.e(AppConfig.TAG, "StartCore-Manager: olcRTC gateway core failed to start")
+                OlcrtcManager.stop()
                 MessageUtil.sendMsg2UI(service, AppConfig.MSG_STATE_START_FAILURE, "")
                 NotificationManager.cancelNotification()
                 return false
             }
         } catch (e: Exception) {
             Log.e(AppConfig.TAG, "StartCore-Manager: olcRTC exception", e)
+            OlcrtcManager.stop()
             return false
         }
 
         MessageUtil.sendMsg2UI(service, AppConfig.MSG_STATE_START_SUCCESS, "")
         NotificationManager.startSpeedNotification(currentConfig)
-        Log.i(AppConfig.TAG, "StartCore-Manager: olcRTC started successfully")
+        Log.i(AppConfig.TAG, "StartCore-Manager: olcRTC gateway started successfully")
         return true
     }
 
@@ -323,9 +343,9 @@ object V2RayServiceManager {
             var errorStr = ""
 
             if (isOlcrtc) {
-                time = measureSocksDelay(SettingsManager.getDelayTestUrl())
+                time = measureOlcrtcDelay(SettingsManager.getDelayTestUrl())
                 if (time == -1L) {
-                    time = measureSocksDelay(SettingsManager.getDelayTestUrl(true))
+                    time = measureOlcrtcDelay(SettingsManager.getDelayTestUrl(true))
                 }
                 if (time == -1L) errorStr = "olcRTC: connection test failed"
             } else {
@@ -366,9 +386,9 @@ object V2RayServiceManager {
      * Does the SOCKS5 handshake manually so we can pass the USER/PASS that
      * OlcrtcManager generates — java.net.Proxy can't carry credentials.
      */
-    private fun measureSocksDelay(url: String): Long {
+    private fun measureOlcrtcDelay(url: String): Long {
         return try {
-            val socksPort = SettingsManager.getSocksPort()
+            val socksPort = SettingsManager.getOlcrtcSocksPort()
             val parsed = java.net.URL(url)
             val host = parsed.host
             val port = if (parsed.port != -1) parsed.port else (if (parsed.protocol == "https") 443 else 80)

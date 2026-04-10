@@ -1,6 +1,6 @@
 [
   {
-    "remarks": "Bypass bittorrent",
+    "remarks": "Direct bittorrent",
     "outboundTag": "direct",
     "protocol": [
       "bittorrent"
@@ -13,31 +13,29 @@
     "network": "udp"
   },
   {
-    "remarks": "Direct LAN IP",
+    "remarks": "Direct private IP",
     "outboundTag": "direct",
     "ip": [
       "geoip:private"
     ]
   },
   {
-    "remarks": "Direct LAN domains",
+    "remarks": "Direct private domains",
     "outboundTag": "direct",
     "domain": [
       "geosite:private"
     ]
   },
   {
-    "remarks": "Bypass Russia domains",
-    "outboundTag": "direct",
+    "remarks": "Proxy Russia inside domains",
+    "outboundTag": "proxy",
     "domain": [
-      "geosite:category-ru"
+      "ext:olcrtc-geosite.dat:russia-inside"
     ]
   },
   {
-    "remarks": "Bypass Russia IP",
-    "outboundTag": "direct",
-    "ip": [
-       "geoip:ru"
-    ]
+    "remarks": "Final direct",
+    "port": "0-65535",
+    "outboundTag": "direct"
   }
 ]

@@ -37,10 +37,18 @@ object SettingsManager {
 
     fun initApp(context: Context) {
         ensureDefaultSettings()
+        migrateGeoFilesSourceToRussia()
         //ensureDefaultSubscription()
         initRoutingRulesets(context)
         migrateServerListToSubscriptions()
         migrateHysteria2PinSHA256()
+    }
+
+    private fun migrateGeoFilesSourceToRussia() {
+        val source = MmkvManager.decodeSettingsString(AppConfig.PREF_GEO_FILES_SOURCES)
+        if (source.isNullOrBlank() || source == "Loyalsoldier/v2ray-rules-dat") {
+            MmkvManager.encodeSettings(AppConfig.PREF_GEO_FILES_SOURCES, AppConfig.GEO_FILES_SOURCES.first())
+        }
     }
 
     /**
@@ -50,7 +58,7 @@ object SettingsManager {
     private fun initRoutingRulesets(context: Context) {
         val exist = MmkvManager.decodeRoutingRulesets()
         if (exist.isNullOrEmpty()) {
-            val rulesetList = getPresetRoutingRulesets(context)
+            val rulesetList = getPresetRoutingRulesets(context, RoutingType.WHITE_RUSSIA.ordinal)
             MmkvManager.encodeRoutingRulesets(rulesetList)
         }
     }
@@ -276,6 +284,16 @@ object SettingsManager {
         return Utils.parseInt(MmkvManager.decodeSettingsString(AppConfig.PREF_SOCKS_PORT), AppConfig.PORT_SOCKS.toInt())
     }
 
+    fun getOlcrtcSocksPort(): Int {
+        val socksPort = getSocksPort()
+        val upstream = socksPort + AppConfig.OLCRTC_UPSTREAM_PORT_OFFSET
+        return when {
+            upstream <= 65535 -> upstream
+            socksPort > AppConfig.OLCRTC_UPSTREAM_PORT_OFFSET -> socksPort - AppConfig.OLCRTC_UPSTREAM_PORT_OFFSET
+            else -> AppConfig.PORT_SOCKS.toInt() + AppConfig.OLCRTC_UPSTREAM_PORT_OFFSET
+        }
+    }
+
     /**
      * Get the HTTP port.
      * @return The HTTP port.
@@ -293,7 +311,7 @@ object SettingsManager {
         val extFolder = Utils.userAssetPath(context)
 
         try {
-            val geo = arrayOf(AppConfig.GEOSITE_DAT, AppConfig.GEOIP_DAT, AppConfig.GEOIP_ONLY_CN_PRIVATE_DAT)
+            val geo = arrayOf(AppConfig.GEOSITE_DAT, AppConfig.GEOIP_DAT)
             assets.list("")
                 ?.filter { geo.contains(it) }
                 ?.filter { !File(extFolder, it).exists() }
@@ -374,8 +392,6 @@ object SettingsManager {
         return when (language) {
             Language.AUTO -> Utils.getSysLocale()
             Language.ENGLISH -> Locale.ENGLISH
-            Language.CHINA -> Locale.CHINA
-            Language.TRADITIONAL_CHINESE -> Locale.TRADITIONAL_CHINESE
             Language.VIETNAMESE -> Locale.forLanguageTag("vi")
             Language.RUSSIAN -> Locale.forLanguageTag("ru")
             Language.PERSIAN -> Locale.forLanguageTag("fa")

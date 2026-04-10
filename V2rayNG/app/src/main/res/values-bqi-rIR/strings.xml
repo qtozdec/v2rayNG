@@ -403,11 +403,8 @@
     </string-array>
 
     <string-array name="preset_rulesets">
-        <item>نومگه اسبؽڌ چین</item>
-        <item>نومگه شه چین</item>
-        <item>جهۊوی (Global)</item>
-        <item>نومگه اسبؽڌ ایران</item>
         <item>نومگه اسبؽڌ رۊسیه</item>
+        <item>جهۊوی (Global)</item>
     </string-array>
 
     <string-array name="vpn_bypass_lan">

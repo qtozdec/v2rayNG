@@ -28,6 +28,9 @@ import com.v2ray.ang.fmt.WireguardFmt
 import com.v2ray.ang.util.HttpUtil
 import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.Utils
+import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
 
 object V2rayConfigManager {
     private var initConfigCache: String? = null
@@ -80,6 +83,31 @@ object V2rayConfigManager {
             Log.e(AppConfig.TAG, "Failed to get V2ray config for speedtest", e)
             return ConfigResult(false)
         }
+    }
+
+    fun getOlcrtcGatewayConfig(context: Context, guid: String, upstreamSocksPort: Int): ConfigResult {
+        val result = ConfigResult(false)
+        val config = MmkvManager.decodeServerConfig(guid) ?: return result
+        if (config.configType != EConfigType.OLCRTC) return result
+
+        val v2rayConfig = initV2rayConfig(context, includeTun = false) ?: return result
+        v2rayConfig.log.loglevel = MmkvManager.decodeSettingsString(AppConfig.PREF_LOGLEVEL) ?: "warning"
+        v2rayConfig.remarks = config.remarks
+
+        getInbounds(v2rayConfig)
+        configureOlcrtcGatewayInbounds(v2rayConfig)
+        configureOlcrtcGatewayOutbounds(v2rayConfig, upstreamSocksPort)
+        configureOlcrtcGatewayRouting(context, v2rayConfig)
+
+        if (MmkvManager.decodeSettingsBool(AppConfig.PREF_SPEED_ENABLED) != true) {
+            v2rayConfig.stats = null
+            v2rayConfig.policy = null
+        }
+
+        result.status = true
+        result.content = JsonUtil.toJsonPretty(v2rayConfig) ?: ""
+        result.guid = guid
+        return result
     }
 
     /**
@@ -333,9 +361,9 @@ object V2rayConfigManager {
      * @param context Android context used to access application assets
      * @return V2rayConfig object parsed from the JSON configuration, or null if the configuration is empty
      */
-    private fun initV2rayConfig(context: Context): V2rayConfig? {
+    private fun initV2rayConfig(context: Context, includeTun: Boolean = needTun()): V2rayConfig? {
         var assets = ""
-        if (needTun()) {
+        if (includeTun) {
             assets = initConfigCacheWithTun ?: Utils.readTextFromAssets(context, "v2ray_config_with_tun.json")
             if (TextUtils.isEmpty(assets)) {
                 return null
@@ -453,6 +481,138 @@ object V2rayConfigManager {
         return true
     }
 
+    private fun configureOlcrtcGatewayInbounds(v2rayConfig: V2rayConfig) {
+        OlcrtcManager.ensureCredentials()
+        val account = V2rayConfig.InboundBean.InSettingsBean.AccountBean(
+            user = OlcrtcManager.socksUser,
+            pass = OlcrtcManager.socksPass
+        )
+        v2rayConfig.inbounds.forEach { inbound ->
+            val proto = inbound.protocol.lowercase()
+            if (proto == EConfigType.SOCKS.name.lowercase() || proto == EConfigType.HTTP.name.lowercase()) {
+                inbound.listen = AppConfig.LOOPBACK
+                val settings = inbound.settings ?: V2rayConfig.InboundBean.InSettingsBean().also { inbound.settings = it }
+                settings.auth = "password"
+                settings.accounts = listOf(account)
+            }
+        }
+    }
+
+    private fun configureOlcrtcGatewayOutbounds(v2rayConfig: V2rayConfig, upstreamSocksPort: Int) {
+        OlcrtcManager.ensureCredentials()
+        val upstreamUser = OutSettingsBean.ServersBean.SocksUsersBean().apply {
+            user = OlcrtcManager.socksUser
+            pass = OlcrtcManager.socksPass
+        }
+        val olcrtcOutbound = OutboundBean(
+            tag = AppConfig.TAG_PROXY,
+            protocol = EConfigType.SOCKS.name.lowercase(),
+            settings = OutSettingsBean(
+                servers = listOf(
+                    OutSettingsBean.ServersBean(
+                        address = AppConfig.LOOPBACK,
+                        port = upstreamSocksPort,
+                        users = listOf(upstreamUser)
+                    )
+                )
+            ),
+            streamSettings = StreamSettingsBean()
+        )
+        val directOutbound = OutboundBean(
+            tag = AppConfig.TAG_DIRECT,
+            protocol = AppConfig.PROTOCOL_FREEDOM,
+            settings = OutSettingsBean(domainStrategy = "UseIP"),
+            mux = null
+        )
+        val blockOutbound = OutboundBean(
+            tag = AppConfig.TAG_BLOCKED,
+            protocol = "blackhole",
+            settings = OutSettingsBean(response = OutSettingsBean.Response("http")),
+            mux = null
+        )
+
+        // Order matters: Xray falls back to the FIRST outbound when no routing
+        // rule matches, so keep `direct` first — that way any config/rule glitch
+        // fails safely to direct instead of silently tunneling everything through olcRTC.
+        v2rayConfig.outbounds = arrayListOf(directOutbound, olcrtcOutbound, blockOutbound)
+    }
+
+    private fun configureOlcrtcGatewayRouting(context: Context, v2rayConfig: V2rayConfig) {
+        v2rayConfig.routing.domainStrategy = "AsIs"
+        v2rayConfig.routing.rules.clear()
+        val geositeRule = getOlcrtcGeositeRule(context)
+        if (geositeRule != null) {
+            v2rayConfig.routing.rules.add(
+                RulesBean(
+                    domain = arrayListOf(geositeRule),
+                    outboundTag = AppConfig.TAG_PROXY
+                )
+            )
+        } else {
+            Log.w(AppConfig.TAG, "olcRTC geosite unavailable — routing all traffic direct")
+        }
+        v2rayConfig.routing.rules.add(
+            RulesBean(
+                network = "tcp,udp",
+                outboundTag = AppConfig.TAG_DIRECT
+            )
+        )
+    }
+
+    private fun getOlcrtcGeositeRule(context: Context): String? {
+        val asset = ensureOlcrtcGeositeAsset(context)
+        // No fallback to `geosite:russia-inside` — that tag only exists in the
+        // itdoginfo dat file. Falling back to built-in geosite would cause Xray
+        // to reject the whole routing config and send everything to the first
+        // outbound (bug: all traffic through olcRTC regardless of domain).
+        return if (asset?.exists() == true && asset.length() > 0) {
+            "ext:${AppConfig.OLCRTC_GEOSITE_DAT}:${AppConfig.OLCRTC_GEOSITE_TAG}"
+        } else {
+            null
+        }
+    }
+
+    private fun ensureOlcrtcGeositeAsset(context: Context): File? {
+        val target = File(Utils.userAssetPath(context), AppConfig.OLCRTC_GEOSITE_DAT)
+        if (target.exists() && target.length() > 0) {
+            return target
+        }
+
+        val temp = File(target.parentFile, "${target.name}.tmp")
+        val conn = HttpUtil.createProxyConnection(
+            AppConfig.OLCRTC_GEOSITE_URL,
+            0,
+            connectTimeout = 15000,
+            readTimeout = 30000,
+            needStream = true
+        ) ?: return null
+
+        return try {
+            if (conn.responseCode != HttpURLConnection.HTTP_OK) {
+                Log.w(AppConfig.TAG, "olcRTC geosite download failed: HTTP ${conn.responseCode}")
+                null
+            } else {
+                target.parentFile?.mkdirs()
+                conn.inputStream.use { input ->
+                    FileOutputStream(temp).use { output -> input.copyTo(output) }
+                }
+                if (temp.renameTo(target)) {
+                    Log.i(AppConfig.TAG, "olcRTC geosite saved to ${target.absolutePath}")
+                    target
+                } else {
+                    temp.delete()
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(AppConfig.TAG, "olcRTC geosite download failed", e)
+            temp.delete()
+            null
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     /**
      * Adds a specific ruleset item to the routing configuration.
      *
@@ -466,19 +626,6 @@ object V2rayConfigManager {
             }
 
             val rule = JsonUtil.fromJson(JsonUtil.toJson(item), RulesBean::class.java) ?: return
-
-            // Replace specific geoip rules with ext versions
-            rule.ip?.let { ipList ->
-                val updatedIpList = ArrayList<String>()
-                ipList.forEach { ip ->
-                    when (ip) {
-                        AppConfig.GEOIP_CN -> updatedIpList.add("ext:${AppConfig.GEOIP_ONLY_CN_PRIVATE_DAT}:cn")
-                        AppConfig.GEOIP_PRIVATE -> updatedIpList.add("ext:${AppConfig.GEOIP_ONLY_CN_PRIVATE_DAT}:private")
-                        else -> updatedIpList.add(ip)
-                    }
-                }
-                rule.ip = updatedIpList
-            }
 
             v2rayConfig.routing.rules.add(rule)
 
@@ -525,7 +672,6 @@ object V2rayConfigManager {
     private fun getCustomLocalDns(v2rayConfig: V2rayConfig): Boolean {
         try {
             if (MmkvManager.decodeSettingsBool(AppConfig.PREF_FAKE_DNS_ENABLED) == true) {
-                val geositeCn = arrayListOf(AppConfig.GEOSITE_CN)
                 val proxyDomain = getUserRule2Domain(AppConfig.TAG_PROXY)
                 val directDomain = getUserRule2Domain(AppConfig.TAG_DIRECT)
                 // fakedns with all domains to make it always top priority
@@ -533,7 +679,7 @@ object V2rayConfigManager {
                     0,
                     V2rayConfig.DnsBean.ServersBean(
                         address = "fakedns",
-                        domains = geositeCn.plus(proxyDomain).plus(directDomain)
+                        domains = proxyDomain.plus(directDomain)
                     )
                 )
             }
@@ -609,14 +755,11 @@ object V2rayConfigManager {
             // domestic DNS
             val domesticDns = SettingsManager.getDomesticDnsServers()
             val directDomain = getUserRule2Domain(AppConfig.TAG_DIRECT)
-            val isCnRoutingMode = directDomain.contains(AppConfig.GEOSITE_CN)
-            val geoipCn = arrayListOf(AppConfig.GEOIP_CN)
             if (directDomain.isNotEmpty()) {
                 servers.add(
                     V2rayConfig.DnsBean.ServersBean(
                         address = domesticDns.first(),
                         domains = directDomain,
-                        expectIPs = if (isCnRoutingMode) geoipCn else null,
                         skipFallback = true,
                         tag = AppConfig.TAG_DOMESTIC_DNS
                     )
@@ -629,15 +772,10 @@ object V2rayConfigManager {
                 hosts.putAll(blkDomain.map { it to AppConfig.LOOPBACK })
             }
 
-            // hardcode googleapi rule to fix play store problems
-            hosts[AppConfig.GOOGLEAPIS_CN_DOMAIN] = AppConfig.GOOGLEAPIS_COM_DOMAIN
-
             // hardcode popular Android Private DNS rule to fix localhost DNS problem
-            hosts[AppConfig.DNS_ALIDNS_DOMAIN] = AppConfig.DNS_ALIDNS_ADDRESSES
             hosts[AppConfig.DNS_CLOUDFLARE_ONE_DOMAIN] = AppConfig.DNS_CLOUDFLARE_ONE_ADDRESSES
             hosts[AppConfig.DNS_CLOUDFLARE_DNS_COM_DOMAIN] = AppConfig.DNS_CLOUDFLARE_DNS_COM_ADDRESSES
             hosts[AppConfig.DNS_CLOUDFLARE_DNS_DOMAIN] = AppConfig.DNS_CLOUDFLARE_DNS_ADDRESSES
-            hosts[AppConfig.DNS_DNSPOD_DOMAIN] = AppConfig.DNS_DNSPOD_ADDRESSES
             hosts[AppConfig.DNS_GOOGLE_DOMAIN] = AppConfig.DNS_GOOGLE_ADDRESSES
             hosts[AppConfig.DNS_QUAD9_DOMAIN] = AppConfig.DNS_QUAD9_ADDRESSES
             hosts[AppConfig.DNS_YANDEX_DOMAIN] = AppConfig.DNS_YANDEX_ADDRESSES

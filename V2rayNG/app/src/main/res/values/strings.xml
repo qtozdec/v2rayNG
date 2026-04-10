@@ -407,11 +407,8 @@
     </string-array>
 
     <string-array name="preset_rulesets">
-        <item>China Whitelist</item>
-        <item>China Blacklist</item>
+        <item>Russia split routing</item>
         <item>Global</item>
-        <item>Iran Whitelist</item>
-        <item>Russia Whitelist</item>
     </string-array>
 
     <string-array name="vpn_bypass_lan">

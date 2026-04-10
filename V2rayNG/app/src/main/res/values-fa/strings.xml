@@ -402,11 +402,8 @@
     </string-array>
 
     <string-array name="preset_rulesets">
-        <item>لیست سفید چین ( دور زدن سرزمین اصلی )</item>
-        <item>لیست سیاه چین</item>
-        <item>جهانی(GLOBAL)</item>
-        <item>ایران</item>
         <item>لیست سفید روسیه</item>
+        <item>جهانی(GLOBAL)</item>
     </string-array>
 
     <string-array name="vpn_bypass_lan">

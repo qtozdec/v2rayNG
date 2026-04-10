@@ -3,8 +3,6 @@ package com.v2ray.ang.enums
 enum class Language(val code: String) {
     AUTO("auto"),
     ENGLISH("en"),
-    CHINA("zh-rCN"),
-    TRADITIONAL_CHINESE("zh-rTW"),
     VIETNAMESE("vi"),
     RUSSIAN("ru"),
     PERSIAN("fa"),
