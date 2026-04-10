@@ -5,7 +5,9 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.contracts.Tun2SocksControl
+import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.handler.MmkvManager
+import com.v2ray.ang.handler.OlcrtcManager
 import com.v2ray.ang.handler.SettingsManager
 import java.io.File
 
@@ -67,10 +69,35 @@ class TProxyService(
                 appendLine("  ipv6: '${vpnConfig.ipv6Client}'")
             }
 
+            val olcrtc = isOlcrtcSelected()
+            if (olcrtc) {
+                // TProxyService runs before OlcrtcManager.start(); make sure the
+                // credentials exist so the yaml and olcRTC agree on them.
+                OlcrtcManager.ensureCredentials()
+            }
             appendLine("socks5:")
             appendLine("  port: ${socksPort}")
             appendLine("  address: ${AppConfig.LOOPBACK}")
             appendLine("  udp: 'udp'")
+            if (olcrtc && OlcrtcManager.socksUser.isNotEmpty()) {
+                appendLine("  username: '${OlcrtcManager.socksUser}'")
+                appendLine("  password: '${OlcrtcManager.socksPass}'")
+            }
+
+            // olcRTC's SOCKS5 only supports TCP CONNECT (no UDP ASSOCIATE).
+            // mapdns intercepts DNS queries destined to a public-looking IP,
+            // hands back fake IPs from 100.64.0.0/10, then on connect substitutes
+            // the real domain into the SOCKS5 request so resolution happens server-side.
+            // Using 1.1.1.1 here makes the VPN DNS look like a normal public resolver
+            // to fingerprinting tools instead of a suspicious private address.
+            if (olcrtc) {
+                appendLine("mapdns:")
+                appendLine("  address: ${AppConfig.OLCRTC_FAKE_DNS}")
+                appendLine("  port: 53")
+                appendLine("  network: 100.64.0.0")
+                appendLine("  netmask: 255.192.0.0")
+                appendLine("  cache-size: 10000")
+            }
 
             // Read-write timeout settings
             val timeoutSetting = MmkvManager.decodeSettingsString(AppConfig.PREF_HEV_TUNNEL_RW_TIMEOUT) ?: AppConfig.HEVTUN_RW_TIMEOUT
@@ -85,6 +112,12 @@ class TProxyService(
             appendLine("  udp-read-write-timeout: ${udpTimeout * 1000}")
             appendLine("  log-level: ${MmkvManager.decodeSettingsString(AppConfig.PREF_HEV_TUNNEL_LOGLEVEL) ?: "warn"}")
         }
+    }
+
+    private fun isOlcrtcSelected(): Boolean {
+        val guid = MmkvManager.getSelectServer() ?: return false
+        val config = MmkvManager.decodeServerConfig(guid) ?: return false
+        return config.configType == EConfigType.OLCRTC
     }
 
     /**

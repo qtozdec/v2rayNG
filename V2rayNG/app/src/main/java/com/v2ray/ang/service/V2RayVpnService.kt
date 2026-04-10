@@ -21,6 +21,7 @@ import com.v2ray.ang.AppConfig.LOOPBACK
 import com.v2ray.ang.BuildConfig
 import com.v2ray.ang.contracts.ServiceControl
 import com.v2ray.ang.contracts.Tun2SocksControl
+import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.NotificationManager
 import com.v2ray.ang.handler.SettingsManager
@@ -232,9 +233,17 @@ class V2RayVpnService : VpnService(), ServiceControl {
         //if (MmkvManager.decodeSettingsBool(AppConfig.PREF_LOCAL_DNS_ENABLED) == true) {
         //  builder.addDnsServer(PRIVATE_VLAN4_ROUTER)
         //} else {
-        SettingsManager.getVpnDnsServers().forEach {
-            if (Utils.isPureIpAddress(it)) {
-                builder.addDnsServer(it)
+        if (isOlcrtcMode()) {
+            // olcRTC can't forward UDP, so DNS goes to hev-socks5-tunnel's mapdns
+            // interceptor. Pointing at 1.1.1.1 makes the VPN look like a normal
+            // network to apps that scan LinkProperties.dnsServers — the query is
+            // still captured inside the TUN and never reaches the real 1.1.1.1.
+            builder.addDnsServer(AppConfig.OLCRTC_FAKE_DNS)
+        } else {
+            SettingsManager.getVpnDnsServers().forEach {
+                if (Utils.isPureIpAddress(it)) {
+                    builder.addDnsServer(it)
+                }
             }
         }
 
@@ -314,14 +323,29 @@ class V2RayVpnService : VpnService(), ServiceControl {
      * Runs the tun2socks process.
      * Starts the tun2socks process with the appropriate parameters.
      */
+    private fun isOlcrtcMode(): Boolean {
+        val guid = MmkvManager.getSelectServer() ?: return false
+        val config = MmkvManager.decodeServerConfig(guid) ?: return false
+        return config.configType == EConfigType.OLCRTC
+    }
+
     private fun runTun2socks() {
-        if (SettingsManager.isUsingHevTun()) {
-            tun2SocksService = TProxyService(
-                context = applicationContext,
-                vpnInterface = mInterface,
-                isRunningProvider = { isRunning },
-                restartCallback = { runTun2socks() }
-            )
+        // olcRTC always needs hev-socks5-tunnel since it provides SOCKS5 directly
+        if (SettingsManager.isUsingHevTun() || isOlcrtcMode()) {
+            try {
+                tun2SocksService = TProxyService(
+                    context = applicationContext,
+                    vpnInterface = mInterface,
+                    isRunningProvider = { isRunning },
+                    restartCallback = { runTun2socks() }
+                )
+            } catch (e: Throwable) {
+                // libhev-socks5-tunnel.so is not bundled in fdroid builds.
+                // UnsatisfiedLinkError in static init becomes NoClassDefFoundError.
+                Log.w(AppConfig.TAG, "StartCore-VPN: hev-socks5-tunnel not available, " +
+                    "tun2socks disabled.", e)
+                tun2SocksService = null
+            }
         } else {
             tun2SocksService = null
         }

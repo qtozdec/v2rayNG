@@ -31,6 +31,7 @@ import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.Utils
+import android.widget.CheckBox
 
 class ServerActivity : BaseActivity() {
 
@@ -157,6 +158,7 @@ class ServerActivity : BaseActivity() {
             EConfigType.TROJAN -> R.layout.activity_server_trojan
             EConfigType.WIREGUARD -> R.layout.activity_server_wireguard
             EConfigType.HYSTERIA2 -> R.layout.activity_server_hysteria2
+            EConfigType.OLCRTC -> R.layout.activity_server_olcrtc
             EConfigType.POLICYGROUP -> null
             else -> null
         } ?: return
@@ -371,6 +373,8 @@ class ServerActivity : BaseActivity() {
             et_port_hop_interval?.text = Utils.getEditable(config.portHoppingInterval)
             et_bandwidth_down?.text = Utils.getEditable(config.bandwidthDown)
             et_bandwidth_up?.text = Utils.getEditable(config.bandwidthUp)
+        } else if (config.configType == EConfigType.OLCRTC) {
+            findViewById<CheckBox>(R.id.cb_duo)?.isChecked = config.headerType == "duo"
         }
         val securityEncryptions =
             if (config.configType == EConfigType.SHADOWSOCKS) shadowsocksSecuritys else securitys
@@ -457,7 +461,7 @@ class ServerActivity : BaseActivity() {
             toast(R.string.server_lab_address)
             return false
         }
-        if (createConfigType != EConfigType.HYSTERIA2) {
+        if (createConfigType != EConfigType.HYSTERIA2 && createConfigType != EConfigType.OLCRTC) {
             if (Utils.parseInt(et_port.text.toString()) <= 0) {
                 toast(R.string.server_lab_port)
                 return false
@@ -500,8 +504,10 @@ class ServerActivity : BaseActivity() {
         }
 
         saveCommon(config)
-        saveStreamSettings(config)
-        saveTls(config)
+        if (config.configType != EConfigType.OLCRTC) {
+            saveStreamSettings(config)
+            saveTls(config)
+        }
 
         config.description = AngConfigManager.generateDescription(config)
 
@@ -546,6 +552,9 @@ class ServerActivity : BaseActivity() {
             config.portHoppingInterval = et_port_hop_interval?.text?.toString()?.trim()
             config.bandwidthDown = et_bandwidth_down?.text?.toString()
             config.bandwidthUp = et_bandwidth_up?.text?.toString()
+        } else if (config.configType == EConfigType.OLCRTC) {
+            config.serverPort = "0"
+            config.headerType = if (findViewById<CheckBox>(R.id.cb_duo)?.isChecked == true) "duo" else ""
         }
     }
 

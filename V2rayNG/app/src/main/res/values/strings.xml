@@ -438,4 +438,10 @@
         <item>WebDAV</item>
     </string-array>
 
+    <!-- olcRTC -->
+    <string name="menu_item_import_config_manually_olcrtc">olcRTC</string>
+    <string name="olcrtc_lab_room_id">Telemost Room ID</string>
+    <string name="olcrtc_lab_key">Encryption Key (hex)</string>
+    <string name="olcrtc_lab_duo">Duo mode (2x channels)</string>
+
 </resources>

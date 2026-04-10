@@ -14,6 +14,7 @@ import com.v2ray.ang.contracts.ServiceControl
 import com.v2ray.ang.dto.ProfileItem
 import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.extension.toast
+import com.v2ray.ang.handler.OlcrtcManager
 import com.v2ray.ang.service.V2RayProxyOnlyService
 import com.v2ray.ang.service.V2RayVpnService
 import com.v2ray.ang.util.MessageUtil
@@ -79,7 +80,7 @@ object V2RayServiceManager {
      * Checks if the V2Ray service is running.
      * @return True if the service is running, false otherwise.
      */
-    fun isRunning() = coreController.isRunning
+    fun isRunning() = coreController.isRunning || OlcrtcManager.isRunning()
 
     /**
      * Gets the name of the currently running server.
@@ -112,6 +113,7 @@ object V2RayServiceManager {
 
         if (config.configType != EConfigType.CUSTOM
             && config.configType != EConfigType.POLICYGROUP
+            && config.configType != EConfigType.OLCRTC
             && !Utils.isValidUrl(config.server)
             && !Utils.isPureIpAddress(config.server.orEmpty())
         ) {
@@ -173,11 +175,6 @@ object V2RayServiceManager {
         }
 
         Log.i(AppConfig.TAG, "StartCore-Manager: Starting core loop for ${config.remarks}")
-        val result = V2rayConfigManager.getV2rayConfig(service, guid)
-        if (!result.status) {
-            Log.e(AppConfig.TAG, "StartCore-Manager: Failed to get V2Ray config")
-            return false
-        }
 
         try {
             val mFilter = IntentFilter(AppConfig.BROADCAST_ACTION_SERVICE)
@@ -191,6 +188,17 @@ object V2RayServiceManager {
         }
 
         currentConfig = config
+
+        if (config.configType == EConfigType.OLCRTC) {
+            return startOlcrtcLoop(service, config)
+        }
+
+        val result = V2rayConfigManager.getV2rayConfig(service, guid)
+        if (!result.status) {
+            Log.e(AppConfig.TAG, "StartCore-Manager: Failed to get V2Ray config")
+            return false
+        }
+
         var tunFd = vpnInterface?.fd ?: 0
         if (SettingsManager.isUsingHevTun()) {
             tunFd = 0
@@ -223,12 +231,48 @@ object V2RayServiceManager {
     }
 
     /**
+     * Starts the olcRTC transport (bypasses xray-core entirely).
+     * olcRTC provides its own SOCKS5 proxy via Telemost WebRTC tunneling.
+     */
+    private fun startOlcrtcLoop(service: Service, config: ProfileItem): Boolean {
+        val socksPort = SettingsManager.getSocksPort()
+        val protectSocket: ((Int) -> Boolean)? = serviceControl?.get()?.let { sc ->
+            { fd: Int -> sc.vpnProtect(fd) }
+        }
+
+        try {
+            NotificationManager.showNotification(currentConfig)
+            if (!OlcrtcManager.start(config, socksPort, protectSocket)) {
+                Log.e(AppConfig.TAG, "StartCore-Manager: olcRTC failed to start")
+                MessageUtil.sendMsg2UI(service, AppConfig.MSG_STATE_START_FAILURE, "")
+                NotificationManager.cancelNotification()
+                return false
+            }
+        } catch (e: Exception) {
+            Log.e(AppConfig.TAG, "StartCore-Manager: olcRTC exception", e)
+            return false
+        }
+
+        MessageUtil.sendMsg2UI(service, AppConfig.MSG_STATE_START_SUCCESS, "")
+        NotificationManager.startSpeedNotification(currentConfig)
+        Log.i(AppConfig.TAG, "StartCore-Manager: olcRTC started successfully")
+        return true
+    }
+
+    /**
      * Stops the V2Ray core service.
      * Unregisters broadcast receivers, stops notifications, and shuts down plugins.
      * @return True if the core was stopped successfully, false otherwise.
      */
     fun stopCoreLoop(): Boolean {
         val service = getService() ?: return false
+
+        // Stop olcRTC if running
+        if (OlcrtcManager.isRunning()) {
+            CoroutineScope(Dispatchers.IO).launch {
+                OlcrtcManager.stop()
+            }
+        }
 
         if (coreController.isRunning) {
             CoroutineScope(Dispatchers.IO).launch {
@@ -268,7 +312,8 @@ object V2RayServiceManager {
      * Also fetches remote IP information if the delay test was successful.
      */
     private fun measureV2rayDelay() {
-        if (coreController.isRunning == false) {
+        val isOlcrtc = OlcrtcManager.isRunning()
+        if (!coreController.isRunning && !isOlcrtc) {
             return
         }
 
@@ -277,18 +322,26 @@ object V2RayServiceManager {
             var time = -1L
             var errorStr = ""
 
-            try {
-                time = coreController.measureDelay(SettingsManager.getDelayTestUrl())
-            } catch (e: Exception) {
-                Log.e(AppConfig.TAG, "StartCore-Manager: Failed to measure delay", e)
-                errorStr = e.message?.substringAfter("\":") ?: "empty message"
-            }
-            if (time == -1L) {
+            if (isOlcrtc) {
+                time = measureSocksDelay(SettingsManager.getDelayTestUrl())
+                if (time == -1L) {
+                    time = measureSocksDelay(SettingsManager.getDelayTestUrl(true))
+                }
+                if (time == -1L) errorStr = "olcRTC: connection test failed"
+            } else {
                 try {
-                    time = coreController.measureDelay(SettingsManager.getDelayTestUrl(true))
+                    time = coreController.measureDelay(SettingsManager.getDelayTestUrl())
                 } catch (e: Exception) {
                     Log.e(AppConfig.TAG, "StartCore-Manager: Failed to measure delay", e)
                     errorStr = e.message?.substringAfter("\":") ?: "empty message"
+                }
+                if (time == -1L) {
+                    try {
+                        time = coreController.measureDelay(SettingsManager.getDelayTestUrl(true))
+                    } catch (e: Exception) {
+                        Log.e(AppConfig.TAG, "StartCore-Manager: Failed to measure delay", e)
+                        errorStr = e.message?.substringAfter("\":") ?: "empty message"
+                    }
                 }
             }
 
@@ -305,6 +358,101 @@ object V2RayServiceManager {
                     MessageUtil.sendMsg2UI(service, AppConfig.MSG_MEASURE_DELAY_SUCCESS, "$result\n$ip")
                 }
             }
+        }
+    }
+
+    /**
+     * Measures delay through the local SOCKS5 proxy (used for olcRTC mode).
+     * Does the SOCKS5 handshake manually so we can pass the USER/PASS that
+     * OlcrtcManager generates — java.net.Proxy can't carry credentials.
+     */
+    private fun measureSocksDelay(url: String): Long {
+        return try {
+            val socksPort = SettingsManager.getSocksPort()
+            val parsed = java.net.URL(url)
+            val host = parsed.host
+            val port = if (parsed.port != -1) parsed.port else (if (parsed.protocol == "https") 443 else 80)
+            val path = if (parsed.file.isNullOrEmpty()) "/" else parsed.file
+
+            val start = System.currentTimeMillis()
+            val sock = java.net.Socket()
+            sock.connect(java.net.InetSocketAddress("127.0.0.1", socksPort), 12000)
+            sock.soTimeout = 12000
+            val out = sock.getOutputStream()
+            val `in` = sock.getInputStream()
+
+            // SOCKS5 greeting with USER/PASS method
+            out.write(byteArrayOf(0x05, 0x01, 0x02.toByte()))
+            val greet = ByteArray(2)
+            if (`in`.read(greet) != 2 || greet[0] != 0x05.toByte() || greet[1] != 0x02.toByte()) {
+                sock.close(); return -1L
+            }
+
+            // RFC 1929 auth
+            val user = OlcrtcManager.socksUser.toByteArray()
+            val pass = OlcrtcManager.socksPass.toByteArray()
+            val auth = java.io.ByteArrayOutputStream().apply {
+                write(0x01)
+                write(user.size)
+                write(user)
+                write(pass.size)
+                write(pass)
+            }.toByteArray()
+            out.write(auth)
+            val authResp = ByteArray(2)
+            if (`in`.read(authResp) != 2 || authResp[1] != 0x00.toByte()) {
+                sock.close(); return -1L
+            }
+
+            // CONNECT to host:port via domain ATYP
+            val hostBytes = host.toByteArray()
+            val req = java.io.ByteArrayOutputStream().apply {
+                write(0x05); write(0x01); write(0x00); write(0x03)
+                write(hostBytes.size)
+                write(hostBytes)
+                write((port shr 8) and 0xff)
+                write(port and 0xff)
+            }.toByteArray()
+            out.write(req)
+
+            val reply = ByteArray(4)
+            if (`in`.read(reply) != 4 || reply[1] != 0x00.toByte()) {
+                sock.close(); return -1L
+            }
+            // Drain bound address
+            val skip = when (reply[3].toInt() and 0xff) {
+                0x01 -> 4 + 2
+                0x03 -> (`in`.read() and 0xff) + 2
+                0x04 -> 16 + 2
+                else -> { sock.close(); return -1L }
+            }
+            val bound = ByteArray(skip)
+            `in`.read(bound)
+
+            // Wrap TLS if https and send a minimal HTTP HEAD
+            val ioSock: java.net.Socket = if (parsed.protocol == "https") {
+                val ssl = javax.net.ssl.SSLSocketFactory.getDefault() as javax.net.ssl.SSLSocketFactory
+                val tls = ssl.createSocket(sock, host, port, true) as javax.net.ssl.SSLSocket
+                tls.startHandshake()
+                tls
+            } else sock
+
+            val writer = ioSock.getOutputStream()
+            val reader = ioSock.getInputStream()
+            val httpReq = "HEAD $path HTTP/1.1\r\nHost: $host\r\nUser-Agent: v2rayNG\r\nConnection: close\r\n\r\n"
+            writer.write(httpReq.toByteArray())
+            writer.flush()
+
+            val headBuf = ByteArray(64)
+            val read = reader.read(headBuf)
+            ioSock.close()
+            if (read <= 0) return -1L
+            val statusLine = String(headBuf, 0, read)
+            val ok = statusLine.startsWith("HTTP/1.1 2") || statusLine.startsWith("HTTP/1.0 2")
+            if (ok) System.currentTimeMillis() - start else -1L
+        } catch (e: Exception) {
+            Log.e(AppConfig.TAG, "StartCore-Manager: SOCKS delay test failed", e)
+            -1L
         }
     }
 
@@ -370,7 +518,7 @@ object V2RayServiceManager {
             val serviceControl = serviceControl?.get() ?: return
             when (intent?.getIntExtra("key", 0)) {
                 AppConfig.MSG_REGISTER_CLIENT -> {
-                    if (coreController.isRunning) {
+                    if (coreController.isRunning || OlcrtcManager.isRunning()) {
                         MessageUtil.sendMsg2UI(serviceControl.getService(), AppConfig.MSG_STATE_RUNNING, "")
                     } else {
                         MessageUtil.sendMsg2UI(serviceControl.getService(), AppConfig.MSG_STATE_NOT_RUNNING, "")

@@ -127,6 +127,10 @@ object AppConfig {
     const val DNS_PROXY = "1.1.1.1"
     const val DNS_DIRECT = "223.5.5.5"
     const val DNS_VPN = "1.1.1.1"
+
+    /** Address the olcRTC mapdns interceptor listens on inside the TUN.
+     *  Looks like a normal public resolver to fingerprinting tools. */
+    const val OLCRTC_FAKE_DNS = "1.1.1.1"
     const val GEOSITE_PRIVATE = "geosite:private"
     const val GEOSITE_CN = "geosite:cn"
     const val GEOIP_PRIVATE = "geoip:private"
@@ -184,6 +188,7 @@ object AppConfig {
     const val HYSTERIA = "hysteria://"
     const val HYSTERIA2 = "hysteria2://"
     const val HY2 = "hy2://"
+    const val OLCRTC = "olcrtc://"
 
     /** Give a good name to this, IDK*/
     const val VPN = "VPN"

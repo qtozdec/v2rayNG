@@ -292,6 +292,11 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
             true
         }
 
+        R.id.import_manually_olcrtc -> {
+            importManually(EConfigType.OLCRTC.value)
+            true
+        }
+
         R.id.export_all -> {
             exportAll()
             true

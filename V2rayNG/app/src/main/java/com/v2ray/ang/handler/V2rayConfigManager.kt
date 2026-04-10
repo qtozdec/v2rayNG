@@ -1159,6 +1159,7 @@ object V2rayConfigManager {
 
             EConfigType.CUSTOM -> null
             EConfigType.POLICYGROUP -> null
+            EConfigType.OLCRTC -> null
         }
     }
 
