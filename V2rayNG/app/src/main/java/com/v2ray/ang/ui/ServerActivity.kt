@@ -7,6 +7,8 @@ import android.view.MenuItem
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Spinner
@@ -31,9 +33,11 @@ import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.Utils
-import android.widget.CheckBox
+import java.security.SecureRandom
 
 class ServerActivity : BaseActivity() {
+    private val olcrtcKeyRegex = Regex("^[0-9a-fA-F]{64}$")
+    private val secureRandom = SecureRandom()
 
     private val editGuid by lazy { intent.getStringExtra("guid").orEmpty() }
     private val isRunning by lazy {
@@ -163,6 +167,14 @@ class ServerActivity : BaseActivity() {
             else -> null
         } ?: return
         setContentViewWithToolbar(layoutId, showHomeAsUp = true, title = (config?.configType ?: createConfigType).toString())
+
+        if ((config?.configType ?: createConfigType) == EConfigType.OLCRTC) {
+            findViewById<Button>(R.id.btn_generate_key)?.setOnClickListener {
+                val key = generateOlcrtcKey()
+                et_id.setText(key)
+                et_id.setSelection(key.length)
+            }
+        }
 
         sp_network?.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(
@@ -427,8 +439,8 @@ class ServerActivity : BaseActivity() {
     private fun clearServer(): Boolean {
         et_remarks.text = null
         et_address.text = null
-        et_port.text = Utils.getEditable(DEFAULT_PORT.toString())
-        et_id.text = null
+        et_port.text = Utils.getEditable(if (createConfigType == EConfigType.OLCRTC) "0" else DEFAULT_PORT.toString())
+        et_id.text = Utils.getEditable(if (createConfigType == EConfigType.OLCRTC) generateOlcrtcKey() else "")
         sp_security?.setSelection(0)
         sp_network?.setSelection(0)
 
@@ -481,6 +493,10 @@ class ServerActivity : BaseActivity() {
             } else {
                 toast(R.string.server_lab_id)
             }
+            return false
+        }
+        if (config.configType == EConfigType.OLCRTC && !olcrtcKeyRegex.matches(et_id.text.toString().trim())) {
+            toast(R.string.olcrtc_msg_key_invalid)
             return false
         }
         sp_stream_security?.let {
@@ -554,8 +570,15 @@ class ServerActivity : BaseActivity() {
             config.bandwidthUp = et_bandwidth_up?.text?.toString()
         } else if (config.configType == EConfigType.OLCRTC) {
             config.serverPort = "0"
+            config.password = config.password?.lowercase()
             config.headerType = if (findViewById<CheckBox>(R.id.cb_duo)?.isChecked == true) "duo" else ""
         }
+    }
+
+    private fun generateOlcrtcKey(): String {
+        val bytes = ByteArray(32)
+        secureRandom.nextBytes(bytes)
+        return bytes.joinToString("") { "%02x".format(it) }
     }
 
 

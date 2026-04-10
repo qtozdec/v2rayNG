@@ -6,6 +6,8 @@ import com.v2ray.ang.util.Utils
 import java.net.URI
 
 object OlcrtcFmt {
+    private val keyRegex = Regex("^[0-9a-fA-F]{64}$")
+
     /**
      * Parses an olcRTC URI string into a ProfileItem.
      * Format: olcrtc://ROOM_ID?key=HEX_KEY&duo=true#remarks
@@ -32,8 +34,12 @@ object OlcrtcFmt {
                     parts[0] to Utils.decodeURIComponent(parts.getOrElse(1) { "" })
                 }
 
-            config.password = queryParam["key"]
+            val keyHex = queryParam["key"] ?: return null
+            if (!keyRegex.matches(keyHex)) return null
+            config.password = keyHex.lowercase()
             config.headerType = if (queryParam["duo"] == "true") "duo" else ""
+        } else {
+            return null
         }
 
         return config

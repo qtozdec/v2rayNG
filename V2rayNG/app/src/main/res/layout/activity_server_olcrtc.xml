@@ -82,6 +82,13 @@
                 android:hint="64-char hex key"
                 android:inputType="textVisiblePassword"
                 android:fontFamily="monospace" />
+
+            <Button
+                android:id="@+id/btn_generate_key"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/padding_spacing_dp8"
+                android:text="@string/olcrtc_btn_generate_key" />
         </LinearLayout>
 
         <!-- Duo mode checkbox -->

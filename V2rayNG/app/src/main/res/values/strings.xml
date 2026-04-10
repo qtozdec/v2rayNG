@@ -439,6 +439,8 @@
     <string name="menu_item_import_config_manually_olcrtc">olcRTC</string>
     <string name="olcrtc_lab_room_id">Telemost Room ID</string>
     <string name="olcrtc_lab_key">Encryption Key (hex)</string>
+    <string name="olcrtc_btn_generate_key">Generate key</string>
     <string name="olcrtc_lab_duo">Duo mode (2x channels)</string>
+    <string name="olcrtc_msg_key_invalid">olcRTC key must be 64 hex characters</string>
 
 </resources>

@@ -13,6 +13,8 @@ import java.security.SecureRandom
  * olcRTC tunnels traffic through Yandex Telemost WebRTC DataChannels.
  */
 object OlcrtcManager {
+    private const val START_TIMEOUT_MS = 30000L
+    private val keyRegex = Regex("^[0-9a-fA-F]{64}$")
 
     /** Randomly generated SOCKS5 credentials for the current session. */
     var socksUser: String = ""
@@ -53,6 +55,10 @@ object OlcrtcManager {
             Log.e(AppConfig.TAG, "olcRTC: roomID or key is empty")
             return false
         }
+        if (!keyRegex.matches(keyHex)) {
+            Log.e(AppConfig.TAG, "olcRTC: key must be 64 hex characters")
+            return false
+        }
 
         try {
             // Set VPN socket protector
@@ -74,10 +80,12 @@ object OlcrtcManager {
             ensureCredentials()
 
             Mobile.start(roomID, keyHex, socksPort.toLong(), duo, socksUser, socksPass)
-            Log.i(AppConfig.TAG, "olcRTC started: room=$roomID port=$socksPort duo=$duo auth=on")
+            Mobile.waitReady(START_TIMEOUT_MS)
+            Log.i(AppConfig.TAG, "olcRTC ready: room=$roomID port=$socksPort duo=$duo auth=on")
             return true
         } catch (e: Exception) {
             Log.e(AppConfig.TAG, "olcRTC start failed", e)
+            stop()
             return false
         }
     }

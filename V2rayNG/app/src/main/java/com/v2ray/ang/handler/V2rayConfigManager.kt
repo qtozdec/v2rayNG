@@ -545,6 +545,7 @@ object V2rayConfigManager {
             v2rayConfig.routing.rules.add(
                 RulesBean(
                     domain = arrayListOf(geositeRule),
+                    network = "tcp",
                     outboundTag = AppConfig.TAG_PROXY
                 )
             )
